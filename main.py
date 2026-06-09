@@ -74,7 +74,8 @@ ANALYSIS_MACRO_KW = re.compile(
 )
 CB_SOURCES = frozenset({"Fed", "ECB"})
 
-GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-2.0-flash"]
+# flash-lite first: higher free-tier daily quota (see aistudio.google.com/rate-limit)
+GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash"]
 
 FOREIGN_MARKERS = re.compile(
     r"アメリカ|米国|トランプ|バイデン|中国|ロシア|ウクライナ|イスラエル|"
