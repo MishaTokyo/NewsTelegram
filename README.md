@@ -41,13 +41,24 @@ python main.py
 > 📰 09.06.2026 · 07:00 JST  
 > 🇯🇵 日本 … 🌍 World …
 
-**Сообщение 2 — металлы** (отдельно, только если есть новые заголовки):
+**Сообщение 2 — металлы** (отдельно, только новые заголовки):
 
 > 🥇 Metals · 09.06.2026 · 07:00 JST  
+> Gold $4,284 (-1.8%) · Silver $47 (+0.5%)
+>
+> Gold  
 > ──────────────────  
-> Gold: $4,284/oz (-1.8%)  
-> Silver: $47.20/oz (+0.5%)  
-> [нейтральный анализ: почему такие цены, перспективы week/month/year]  
+> Citi cut gold target to $4,000. COMEX holdings rose. Fed minutes cited rate path.
+>
+> Silver  
+> ──────────────────  
+> Silver rebounded to 200-day average. Industrial demand from solar sector cited.
+>
+> [анализ]  
+> Week: range-bound if CPI inline. Month: real yields key. Year: ETF flows vs rate cycle.
+>
 > ············  
 > Перевод  
 > *[скрыто блюром]*
+
+Факты — только из заголовков. [анализ] — максимум 3 предложения с перспективой 7/30/365 дней.

@@ -39,8 +39,11 @@ WORLD_FEEDS = [
 METALS_FEEDS = [
     ("Mining.com", "https://www.mining.com/feed/"),
     ("BBC Business", "https://feeds.bbci.co.uk/news/business/rss.xml"),
+    ("Reuters", "https://feeds.reuters.com/reuters/businessNews"),
 ]
 
+GOLD_KW = re.compile(r"\b(gold|xau|bullion)\b", re.I)
+SILVER_KW = re.compile(r"\b(silver|xag)\b", re.I)
 METALS_KEYWORDS = re.compile(
     r"gold|silver|xau|xag|precious.?metal|bullion|comex|platinum|palladium",
     re.I,
@@ -84,36 +87,47 @@ WORLD_BLOCK = """🌍 World
 Перевод
 <professional Russian translation. Same facts, concise.>"""
 
-METALS_PROMPT = """Write a professional precious-metals market brief (separate Telegram message).
+METALS_PROMPT = """Compile a precious-metals brief from HEADLINES ONLY (separate Telegram message).
 
 Output format (follow EXACTLY):
 
-🥇 Gold & Silver
+🥇 Metals
 ──────────────────
 
-<PRICES block — copy SPOT PRICES below verbatim, one line per metal>
+<one line: copy SPOT PRICES verbatim, format "Gold $X (+Y%) · Silver $Z (+W%)">
 
-<ENGLISH analysis, 5–8 sentences, institutional desk note style:
-- Why gold and silver are at these levels today (macro, rates, USD, flows, geopolitics, industrial demand).
-- Balanced: cite factors supporting AND pressuring prices. No bullish/bearish bias.
-- Outlook: one conditional clause each for ~1 week, ~1 month, ~1 year ("if real yields...", "range likely while...").
-- End with: "Not investment advice.">
+Gold
+──────────────────
+
+<ENGLISH only. One short paragraph, 4–6 telegraphic sentences. Summarize ONLY the GOLD headlines below — facts, numbers, names. Do NOT invent. Do NOT add macro opinion not in headlines.>
+
+Silver
+──────────────────
+
+<ENGLISH only. One short paragraph, 4–6 telegraphic sentences. Summarize ONLY the SILVER headlines below.>
+
+[анализ]
+<ENGLISH. MAX 3 sentences total. Neutral conditional outlook derived ONLY from the headlines above: ~7 days / ~30 days / ~1 year. No hype, not investment advice.>
 
 ············
 Перевод
-<professional Russian translation. Same structure and facts.>
+<Russian translation of Gold + Silver + [анализ] blocks. Professional, concise.>
 
 Rules:
-- Use SPOT PRICES exactly as given.
-- Neutral, factual, no hype, not investment advice.
-- Do NOT invent prices or events.
-- No extra sections or text.
+- Headlines are the ONLY source for Gold/Silver sections. No fabricated news.
+- If a metal has no headlines, write one line: "No major headlines."
+- [анализ] must be ≤3 sentences, balanced, conditional.
+- Use SPOT PRICES exactly on the first line.
+- No extra sections.
 
 SPOT PRICES:
 {prices}
 
-METALS headlines:
-{headlines}
+GOLD headlines:
+{gold_headlines}
+
+SILVER headlines:
+{silver_headlines}
 """
 
 
@@ -148,7 +162,7 @@ def fetch_metals_headlines() -> list[dict]:
 
 
 def fetch_metals_prices() -> str:
-    lines: list[str] = []
+    parts: list[str] = []
     for symbol, label in [("GC=F", "Gold"), ("SI=F", "Silver")]:
         try:
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1d"
@@ -158,10 +172,10 @@ def fetch_metals_prices() -> str:
             price = float(meta["regularMarketPrice"])
             prev = float(meta.get("chartPreviousClose") or meta.get("previousClose") or price)
             chg_pct = (price - prev) / prev * 100 if prev else 0.0
-            lines.append(f"{label}: ${price:,.2f}/oz ({chg_pct:+.2f}% today)")
+            parts.append(f"{label} ${price:,.0f} ({chg_pct:+.1f}%)")
         except Exception as e:
             print(f"Price {symbol}: {e}", file=sys.stderr)
-    return "\n".join(lines) if lines else ""
+    return " · ".join(parts) if parts else "Prices unavailable"
 
 
 def item_key(title: str) -> str:
@@ -302,10 +316,18 @@ def summarize_news(japan_items: list[dict], world_items: list[dict]) -> str:
     return clean_brief(call_gemini(build_news_prompt(japan_items, world_items)))
 
 
+def split_gold_silver(items: list[dict]) -> tuple[list[dict], list[dict]]:
+    gold = [it for it in items if GOLD_KW.search(it["title"])]
+    silver = [it for it in items if SILVER_KW.search(it["title"])]
+    return gold, silver
+
+
 def summarize_metals(metals_headlines: list[dict], prices: str) -> str:
+    gold, silver = split_gold_silver(metals_headlines)
     prompt = METALS_PROMPT.format(
         prices=prices,
-        headlines=format_headlines(metals_headlines) or "(no headlines — use macro context only)",
+        gold_headlines=format_headlines(gold) or "(none)",
+        silver_headlines=format_headlines(silver) or "(none)",
     )
     return clean_brief(call_gemini(prompt))
 
@@ -360,7 +382,7 @@ def main() -> None:
         print("No new news — skipping news message.")
 
     # --- Message 2: Metals (only if new headlines) ---
-    if metals_new and prices:
+    if metals_new:
         try:
             metals_brief = summarize_metals(metals_new, prices)
             send_telegram(f"{metals_header}\n\n{metals_brief}", html=True)
@@ -368,11 +390,8 @@ def main() -> None:
             print(f"Metals sent. new={len(metals_new)}")
         except RuntimeError as e:
             errors.append("metals")
-            send_telegram(f"{metals_header}\n\n⚠️ Не удалось сгенерировать анализ металлов (лимит Gemini API).")
+            send_telegram(f"{metals_header}\n\n⚠️ Не удалось сгенерировать дайджест металлов (лимит Gemini API).")
             print(f"Metals failed: {e}", file=sys.stderr)
-    elif metals_new and not prices:
-        send_telegram(f"{metals_header}\n\n⚠️ Цены на металлы недоступны.")
-        errors.append("prices")
     else:
         print("No new metals headlines — skipping metals message.")
 
