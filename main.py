@@ -18,7 +18,7 @@ load_dotenv()
 
 TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Tokyo"))
 CACHE_FILE = os.getenv("SENT_CACHE_FILE", "sent_cache.json")
-CACHE_TTL_HOURS = 72
+CACHE_TTL_HOURS = 24
 MAX_ITEMS = 20
 METALS_MAX_ITEMS = 12
 TELEGRAM_LIMIT = 4096
