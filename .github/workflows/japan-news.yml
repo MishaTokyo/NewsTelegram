@@ -1,0 +1,43 @@
+name: Japan news brief
+
+on:
+  schedule:
+    # 07:00 JST (UTC+9) = 22:00 UTC
+    - cron: "0 22 * * *"
+    # 19:00 JST = 10:00 UTC
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+    inputs:
+      run_kind:
+        description: morning or evening
+        required: false
+        default: morning
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set run kind
+        id: kind
+        run: |
+          case "${{ github.event.schedule }}" in
+            "0 22 * * *") echo "kind=morning" >> "$GITHUB_OUTPUT" ;;
+            "0 10 * * *") echo "kind=evening" >> "$GITHUB_OUTPUT" ;;
+            *)            echo "kind=${{ github.event.inputs.run_kind || 'morning' }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - run: pip install -r requirements.txt
+
+      - run: python main.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RUN_KIND: ${{ steps.kind.outputs.kind }}
+          TIMEZONE: Asia/Tokyo
