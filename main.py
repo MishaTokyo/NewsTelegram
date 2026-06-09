@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Japan + World + Metals news brief → Telegram."""
+"""Japan + World news and separate Metals brief → Telegram."""
 
 import json
 import os
@@ -42,8 +42,7 @@ METALS_FEEDS = [
 ]
 
 METALS_KEYWORDS = re.compile(
-    r"gold|silver|xau|xag|precious.?metal|bullion|comex|"
-    r"золот|серебр|白金|金|銀|パラジウム|platinum",
+    r"gold|silver|xau|xag|precious.?metal|bullion|comex|platinum|palladium",
     re.I,
 )
 
@@ -56,16 +55,15 @@ FOREIGN_MARKERS = re.compile(
     r"英首相|米大統領|国連総会|海外|外国|グローバル|国際情勢"
 )
 
-PROMPT_RULES = """Rules:
+NEWS_PROMPT_RULES = """Rules:
 - Cover only the headlines listed below (all are NEW since the last digest).
 - Japan block: ONLY Japan-domestic news. ZERO mentions of other countries.
 - Japanese readings: after prefectures, cities, and personal names in kanji, add reading in Japanese parentheses: 石川県（いしかわけん）、高市早苗（たかいちさなえ）.
-- Metals block: strictly neutral analysis — no bullish/bearish bias, no hype, not investment advice. Present drivers on both sides (what supports AND what pressures prices). Outlook for ~1 week / ~1 month / ~1 year must be conditional ("if rates stay...", "consensus sees range..."), cite factors not certainties.
 - Dashes (──────────────────) ONLY under section titles and between main sections — never under "Перевод".
 - Before each translation: one line of middle dots (············) then "Перевод" — no emojis, no flags.
-- Russian translations: professional newsroom style, not word-for-word literal.
+- Russian translations: professional newsroom style.
 - Skip minor crime unless nationally significant.
-- Do NOT invent facts or prices.
+- Do NOT invent facts.
 - No extra text outside the structure shown."""
 
 JAPAN_BLOCK = """🇯🇵 日本
@@ -86,25 +84,37 @@ WORLD_BLOCK = """🌍 World
 Перевод
 <professional Russian translation. Same facts, concise.>"""
 
-METALS_BLOCK = """🥇 Gold & Silver
+METALS_PROMPT = """Write a professional precious-metals market brief (separate Telegram message).
+
+Output format (follow EXACTLY):
+
+🥇 Gold & Silver
 ──────────────────
 
-<ENGLISH only. One dense paragraph, 6–10 sentences:
-1) State current gold & silver levels from SPOT PRICES (use exact numbers).
-2) Why prices are moving today — 2–4 factual drivers from headlines AND macro (rates, USD, geopolitics, ETF flows, industrial demand). Mention factors that could push UP and DOWN — balanced.
-3) Outlook: one short clause each for ~1 week, ~1 month, ~1 year — neutral, conditional, no predictions-as-facts.
-End with: "Not investment advice.">
+<PRICES block — copy SPOT PRICES below verbatim, one line per metal>
+
+<ENGLISH analysis, 5–8 sentences, institutional desk note style:
+- Why gold and silver are at these levels today (macro, rates, USD, flows, geopolitics, industrial demand).
+- Balanced: cite factors supporting AND pressuring prices. No bullish/bearish bias.
+- Outlook: one conditional clause each for ~1 week, ~1 month, ~1 year ("if real yields...", "range likely while...").
+- End with: "Not investment advice.">
 
 ············
 Перевод
-<professional Russian translation. Same facts, concise.>"""
+<professional Russian translation. Same structure and facts.>
 
-METALS_ONLY_RULES = """Rules:
-- Metals-only update (no Japan/World sections in output).
-- Strictly neutral — no bias, no hype, not investment advice.
-- Use SPOT PRICES exactly. Balance up-side and down-side drivers.
-- Outlook: conditional clauses for ~1 week / ~1 month / ~1 year.
-- Format exactly as shown. Do NOT invent facts."""
+Rules:
+- Use SPOT PRICES exactly as given.
+- Neutral, factual, no hype, not investment advice.
+- Do NOT invent prices or events.
+- No extra sections or text.
+
+SPOT PRICES:
+{prices}
+
+METALS headlines:
+{headlines}
+"""
 
 
 def require_env(name: str) -> str:
@@ -138,7 +148,6 @@ def fetch_metals_headlines() -> list[dict]:
 
 
 def fetch_metals_prices() -> str:
-    """Spot-like prices via Yahoo Finance futures (free, no API key)."""
     lines: list[str] = []
     for symbol, label in [("GC=F", "Gold"), ("SI=F", "Silver")]:
         try:
@@ -152,7 +161,7 @@ def fetch_metals_prices() -> str:
             lines.append(f"{label}: ${price:,.2f}/oz ({chg_pct:+.2f}% today)")
         except Exception as e:
             print(f"Price {symbol}: {e}", file=sys.stderr)
-    return "\n".join(lines) if lines else "Prices unavailable"
+    return "\n".join(lines) if lines else ""
 
 
 def item_key(title: str) -> str:
@@ -228,15 +237,11 @@ def call_gemini(prompt: str) -> str:
 
 
 def prefilter_japan(items: list[dict]) -> list[dict]:
-    """Drop obvious foreign-news headlines before AI filter."""
     domestic = [it for it in items if not FOREIGN_MARKERS.search(it["title"])]
-    if not domestic:
-        domestic = items
-    return domestic
+    return domestic if domestic else items
 
 
 def filter_japan_headlines(items: list[dict]) -> list[dict]:
-    """Keep Japan-domestic headlines without an extra Gemini call (saves API quota)."""
     filtered = prefilter_japan(items)
     print(f"Japan filter: {len(items)} → {len(filtered)}", file=sys.stderr)
     return dedupe(filtered, limit=MAX_ITEMS)
@@ -260,7 +265,6 @@ TRANSLATION_RE = re.compile(
 
 
 def to_telegram_html(text: str) -> str:
-    """Wrap each translation block in Telegram spoiler (tap-to-reveal blur)."""
     out: list[str] = []
     pos = 0
     for m in TRANSLATION_RE.finditer(text):
@@ -272,61 +276,36 @@ def to_telegram_html(text: str) -> str:
     return "".join(out)
 
 
-def build_prompt(
-    japan_items: list[dict],
-    world_items: list[dict],
-    metals_headlines: list[dict],
-    prices: str,
-    *,
-    metals_only: bool = False,
-) -> str:
-    if metals_only:
-        return "\n\n".join([
-            "Write a metals-only market brief.",
-            f"Output format (follow EXACTLY):\n\n{METALS_BLOCK}",
-            METALS_ONLY_RULES,
-            f"SPOT PRICES (use these exact numbers):\n{prices}",
-            f"METALS headlines:\n{format_headlines(metals_headlines) or '(use macro context from prices only)'}",
-        ])
-
+def build_news_prompt(japan_items: list[dict], world_items: list[dict]) -> str:
     blocks: list[str] = []
     if japan_items:
         blocks.append(JAPAN_BLOCK)
-    if japan_items and (world_items or metals_headlines or prices):
+    if japan_items and world_items:
         blocks.append("──────────────────")
     if world_items:
         blocks.append(WORLD_BLOCK)
-    if world_items and (metals_headlines or prices):
-        blocks.append("──────────────────")
-    if metals_headlines or prices:
-        blocks.append(METALS_BLOCK)
 
     parts = [
         "Write a news brief from the NEW headlines below.",
         "Output format (follow EXACTLY):\n",
         "\n\n".join(blocks),
-        PROMPT_RULES,
-        f"SPOT PRICES (use for metals section):\n{prices}",
+        NEWS_PROMPT_RULES,
     ]
     if japan_items:
         parts.append(f"JAPAN headlines:\n{format_headlines(japan_items)}")
     if world_items:
         parts.append(f"WORLD headlines:\n{format_headlines(world_items)}")
-    if metals_headlines:
-        parts.append(f"METALS headlines:\n{format_headlines(metals_headlines)}")
     return "\n\n".join(parts)
 
 
-def summarize(
-    japan_items: list[dict],
-    world_items: list[dict],
-    metals_items: list[dict],
-    prices: str,
-    *,
-    metals_only: bool = False,
-) -> str:
-    prompt = build_prompt(
-        japan_items, world_items, metals_items, prices, metals_only=metals_only,
+def summarize_news(japan_items: list[dict], world_items: list[dict]) -> str:
+    return clean_brief(call_gemini(build_news_prompt(japan_items, world_items)))
+
+
+def summarize_metals(metals_headlines: list[dict], prices: str) -> str:
+    prompt = METALS_PROMPT.format(
+        prices=prices,
+        headlines=format_headlines(metals_headlines) or "(no headlines — use macro context only)",
     )
     return clean_brief(call_gemini(prompt))
 
@@ -335,66 +314,70 @@ def send_telegram(text: str, *, html: bool = False) -> None:
     token = require_env("TELEGRAM_BOT_TOKEN")
     chat_id = require_env("TELEGRAM_CHAT_ID")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload: dict = {
-        "chat_id": chat_id,
-        "text": text[:TELEGRAM_LIMIT],
-        "disable_web_page_preview": True,
-    }
-    if html:
-        payload["parse_mode"] = "HTML"
-    r = requests.post(url, json=payload, timeout=30)
-    r.raise_for_status()
+    body = to_telegram_html(text) if html else text
+    remaining = body
+    while remaining:
+        chunk, remaining = remaining[:TELEGRAM_LIMIT], remaining[TELEGRAM_LIMIT:]
+        payload: dict = {
+            "chat_id": chat_id,
+            "text": chunk,
+            "disable_web_page_preview": True,
+        }
+        if html:
+            payload["parse_mode"] = "HTML"
+        r = requests.post(url, json=payload, timeout=30)
+        r.raise_for_status()
 
 
 def main() -> None:
     now = datetime.now(TZ)
-    header = f"📰 {now:%d.%m.%Y} · {now:%H:%M} JST"
+    news_header = f"📰 {now:%d.%m.%Y} · {now:%H:%M} JST"
+    metals_header = f"🥇 Metals · {now:%d.%m.%Y} · {now:%H:%M} JST"
     sent_cache = load_sent_cache()
     prices = fetch_metals_prices()
+    errors: list[str] = []
 
     japan_all = filter_japan_headlines(dedupe(fetch_rss(JAPAN_FEEDS)))
     world_all = dedupe(fetch_rss(WORLD_FEEDS))
     metals_all = fetch_metals_headlines()
 
-    if not japan_all and not world_all and not metals_all and prices == "Prices unavailable":
-        send_telegram(f"{header}\n\nИсточники недоступны.")
-        return
-
     japan_items = filter_new(japan_all, sent_cache)
     world_items = filter_new(world_all, sent_cache)
     metals_new = filter_new(metals_all, sent_cache)
-    has_news = bool(japan_items or world_items)
-    metals_only = not has_news
 
-    if metals_only and prices == "Prices unavailable" and not metals_new:
-        send_telegram(f"{header}\n\nНовых новостей с прошлой рассылки нет.")
-        print("Nothing new to send.")
-        return
+    # --- Message 1: News (only if new headlines) ---
+    if japan_items or world_items:
+        try:
+            news_brief = summarize_news(japan_items, world_items)
+            send_telegram(f"{news_header}\n\n{news_brief}", html=True)
+            mark_sent(japan_items + world_items, sent_cache, now)
+            print(f"News sent. japan={len(japan_items)} world={len(world_items)}")
+        except RuntimeError as e:
+            errors.append("news")
+            send_telegram(f"{news_header}\n\n⚠️ Не удалось сгенерировать новости (лимит Gemini API).")
+            print(f"News failed: {e}", file=sys.stderr)
+    else:
+        print("No new news — skipping news message.")
 
-    metals_headlines = metals_all if metals_only else (metals_new or metals_all[:6])
+    # --- Message 2: Metals (always, separate message) ---
+    if prices:
+        try:
+            metals_brief = summarize_metals(metals_all[:8], prices)
+            send_telegram(f"{metals_header}\n\n{metals_brief}", html=True)
+            mark_sent(metals_new, sent_cache, now)
+            print("Metals sent.")
+        except RuntimeError as e:
+            errors.append("metals")
+            send_telegram(f"{metals_header}\n\n⚠️ Не удалось сгенерировать анализ металлов (лимит Gemini API).")
+            print(f"Metals failed: {e}", file=sys.stderr)
+    else:
+        send_telegram(f"{metals_header}\n\n⚠️ Цены на металлы недоступны.")
+        errors.append("prices")
 
-    try:
-        brief = summarize(
-            japan_items,
-            world_items,
-            metals_headlines,
-            prices,
-            metals_only=metals_only,
-        )
-    except RuntimeError as e:
-        send_telegram(f"{header}\n\n⚠️ Не удалось сгенерировать дайджест (лимит Gemini API). Попробуйте позже.")
-        print(f"Gemini failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    send_telegram(to_telegram_html(f"{header}\n\n{brief}"), html=True)
-
-    to_mark = japan_items + world_items + metals_new
-    mark_sent(to_mark, sent_cache, now)
     save_sent_cache(sent_cache)
-    print(
-        "Sent.", len(brief), "chars,",
-        f"japan={len(japan_items)} world={len(world_items)} metals_only={metals_only}",
-    )
+
+    if errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

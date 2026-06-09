@@ -13,17 +13,24 @@ on:
         required: false
         default: morning
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   send:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Restore sent headlines cache
-        uses: actions/cache/restore@v4
+      - name: Cache sent headlines
+        uses: actions/cache@v4
         with:
           path: sent_cache.json
-          key: sent-headlines-main
+          key: news-sent-cache-v1
+          restore-keys: news-sent-cache-v1
+
+      - name: Ensure cache file exists
+        run: test -f sent_cache.json || echo '{}' > sent_cache.json
 
       - uses: actions/setup-python@v5
         with:
@@ -48,10 +55,3 @@ jobs:
           RUN_KIND: ${{ steps.kind.outputs.kind }}
           TIMEZONE: Asia/Tokyo
           SENT_CACHE_FILE: sent_cache.json
-
-      - name: Save sent headlines cache
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: sent_cache.json
-          key: sent-headlines-main
