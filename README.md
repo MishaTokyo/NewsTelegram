@@ -55,10 +55,10 @@ python main.py
 > Silver rebounded to 200-day average. Industrial demand from solar sector cited.
 >
 > [анализ]  
-> Week: range-bound if CPI inline. Month: real yields key. Year: ETF flows vs rate cycle.
+> Sprott: debt cycle supports gold. Fed: rates on hold. 7d/30d/1y — только из источников.
 >
 > ············  
 > Перевод  
 > *[скрыто блюром]*
 
-Факты — только из заголовков. [анализ] — максимум 3 предложения с перспективой 7/30/365 дней.
+Gold/Silver — из новостных заголовков. [анализ] — только Fed, ECB, аналитики (≤3 предложения, 7/30/365 дней).

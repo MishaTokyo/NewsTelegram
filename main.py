@@ -42,12 +42,37 @@ METALS_FEEDS = [
     ("Reuters", "https://feeds.reuters.com/reuters/businessNews"),
 ]
 
+# Central banks + institutions for [анализ] section
+ANALYSIS_FEEDS = [
+    ("Fed", "https://www.federalreserve.gov/feeds/press_all.xml"),
+    ("ECB", "https://www.ecb.europa.eu/rss/press.html"),
+    ("Mining.com", "https://www.mining.com/feed/"),
+    ("Reuters", "https://feeds.reuters.com/reuters/businessNews"),
+    ("BBC Business", "https://feeds.bbci.co.uk/news/business/rss.xml"),
+]
+
 GOLD_KW = re.compile(r"\b(gold|xau|bullion)\b", re.I)
 SILVER_KW = re.compile(r"\b(silver|xag)\b", re.I)
 METALS_KEYWORDS = re.compile(
     r"gold|silver|xau|xag|precious.?metal|bullion|comex|platinum|palladium",
     re.I,
 )
+ANALYSIS_METALS_KW = re.compile(
+    r"gold|silver|xau|xag|precious|bullion|comex|platinum|palladium",
+    re.I,
+)
+ANALYSIS_OPINION_KW = re.compile(
+    r"outlook|forecast|target|expects|sees|warns|cut|raise|analyst|"
+    r"sprott|goldman|citi|jpmorgan|ubs|barclays|deutsche|hsbc|"
+    r"world gold council|imf|treasury|comex|etf",
+    re.I,
+)
+ANALYSIS_MACRO_KW = re.compile(
+    r"rate|inflation|cpi|yield|monetary|policy|dollar|fed|ecb|boj|"
+    r"central bank|fomc|minutes|powell|lagarde|interest",
+    re.I,
+)
+CB_SOURCES = frozenset({"Fed", "ECB"})
 
 GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-2.0-flash"]
 
@@ -107,16 +132,17 @@ Silver
 <ENGLISH only. One short paragraph, 4–6 telegraphic sentences. Summarize ONLY the SILVER headlines below.>
 
 [анализ]
-<ENGLISH. MAX 3 sentences total. Neutral conditional outlook derived ONLY from the headlines above: ~7 days / ~30 days / ~1 year. No hype, not investment advice.>
+<ENGLISH. MAX 3 sentences. Outlook for ~7 days / ~30 days / ~1 year — synthesize ONLY from ANALYSIS SOURCES below (central banks, analysts, institutions). Attribute sources: "Fed: ...", "Sprott: ...", "Citi: ...". Balanced, neutral. If sources lack outlook data, write: "No institutional outlook in current sources." Do NOT invent opinions or forecasts. Not investment advice.>
 
 ············
 Перевод
 <Russian translation of Gold + Silver + [анализ] blocks. Professional, concise.>
 
 Rules:
-- Headlines are the ONLY source for Gold/Silver sections. No fabricated news.
+- Gold/Silver sections: ONLY from GOLD/SILVER headlines. No fabricated news.
+- [анализ]: ONLY from ANALYSIS SOURCES. Never invent central bank or analyst views.
 - If a metal has no headlines, write one line: "No major headlines."
-- [анализ] must be ≤3 sentences, balanced, conditional.
+- [анализ] must be ≤3 sentences.
 - Use SPOT PRICES exactly on the first line.
 - No extra sections.
 
@@ -128,6 +154,9 @@ GOLD headlines:
 
 SILVER headlines:
 {silver_headlines}
+
+ANALYSIS SOURCES (central banks, institutions, analyst views — use ONLY for [анализ]):
+{analysis_headlines}
 """
 
 
@@ -157,8 +186,31 @@ def fetch_metals_headlines() -> list[dict]:
     items = fetch_rss(METALS_FEEDS)
     filtered = [it for it in items if METALS_KEYWORDS.search(it["title"])]
     if not filtered:
-        filtered = items[:METALS_MAX_ITEMS]
+        filtered = [it for it in items if ANALYSIS_METALS_KW.search(it["title"])]
     return dedupe(filtered, limit=METALS_MAX_ITEMS)
+
+
+def is_analysis_headline(item: dict) -> bool:
+    title = item["title"]
+    source = item["source"]
+    if source in CB_SOURCES and ANALYSIS_MACRO_KW.search(title):
+        return True
+    if ANALYSIS_METALS_KW.search(title) and ANALYSIS_OPINION_KW.search(title):
+        return True
+    if ANALYSIS_METALS_KW.search(title) and re.search(
+        r"sprott|goldman|citi|jpmorgan|ubs|barclays|deutsche|hsbc|"
+        r"world gold council|imf|treasury|analyst|fund",
+        title,
+        re.I,
+    ):
+        return True
+    return False
+
+
+def fetch_analysis_headlines() -> list[dict]:
+    items = fetch_rss(ANALYSIS_FEEDS)
+    filtered = [it for it in items if is_analysis_headline(it)]
+    return dedupe(filtered, limit=15)
 
 
 def fetch_metals_prices() -> str:
@@ -322,12 +374,17 @@ def split_gold_silver(items: list[dict]) -> tuple[list[dict], list[dict]]:
     return gold, silver
 
 
-def summarize_metals(metals_headlines: list[dict], prices: str) -> str:
+def summarize_metals(
+    metals_headlines: list[dict],
+    analysis_headlines: list[dict],
+    prices: str,
+) -> str:
     gold, silver = split_gold_silver(metals_headlines)
     prompt = METALS_PROMPT.format(
         prices=prices,
         gold_headlines=format_headlines(gold) or "(none)",
         silver_headlines=format_headlines(silver) or "(none)",
+        analysis_headlines=format_headlines(analysis_headlines) or "(none)",
     )
     return clean_brief(call_gemini(prompt))
 
@@ -362,10 +419,12 @@ def main() -> None:
     japan_all = filter_japan_headlines(dedupe(fetch_rss(JAPAN_FEEDS)))
     world_all = dedupe(fetch_rss(WORLD_FEEDS))
     metals_all = fetch_metals_headlines()
+    analysis_all = fetch_analysis_headlines()
 
     japan_items = filter_new(japan_all, sent_cache)
     world_items = filter_new(world_all, sent_cache)
     metals_new = filter_new(metals_all, sent_cache)
+    analysis_new = filter_new(analysis_all, sent_cache)
 
     # --- Message 1: News (only if new headlines) ---
     if japan_items or world_items:
@@ -381,19 +440,21 @@ def main() -> None:
     else:
         print("No new news — skipping news message.")
 
-    # --- Message 2: Metals (only if new headlines) ---
-    if metals_new:
+    # --- Message 2: Metals (new headlines or new institutional analysis) ---
+    if metals_new or analysis_new:
         try:
-            metals_brief = summarize_metals(metals_new, prices)
+            metals_brief = summarize_metals(metals_new, analysis_all, prices)
             send_telegram(f"{metals_header}\n\n{metals_brief}", html=True)
-            mark_sent(metals_new, sent_cache, now)
-            print(f"Metals sent. new={len(metals_new)}")
+            mark_sent(metals_new + analysis_new, sent_cache, now)
+            print(
+                f"Metals sent. news={len(metals_new)} analysis={len(analysis_new)}",
+            )
         except RuntimeError as e:
             errors.append("metals")
             send_telegram(f"{metals_header}\n\n⚠️ Не удалось сгенерировать дайджест металлов (лимит Gemini API).")
             print(f"Metals failed: {e}", file=sys.stderr)
     else:
-        print("No new metals headlines — skipping metals message.")
+        print("No new metals/analysis headlines — skipping metals message.")
 
     save_sent_cache(sent_cache)
 
