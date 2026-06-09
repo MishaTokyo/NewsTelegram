@@ -359,20 +359,22 @@ def main() -> None:
     else:
         print("No new news — skipping news message.")
 
-    # --- Message 2: Metals (always, separate message) ---
-    if prices:
+    # --- Message 2: Metals (only if new headlines) ---
+    if metals_new and prices:
         try:
-            metals_brief = summarize_metals(metals_all[:8], prices)
+            metals_brief = summarize_metals(metals_new, prices)
             send_telegram(f"{metals_header}\n\n{metals_brief}", html=True)
             mark_sent(metals_new, sent_cache, now)
-            print("Metals sent.")
+            print(f"Metals sent. new={len(metals_new)}")
         except RuntimeError as e:
             errors.append("metals")
             send_telegram(f"{metals_header}\n\n⚠️ Не удалось сгенерировать анализ металлов (лимит Gemini API).")
             print(f"Metals failed: {e}", file=sys.stderr)
-    else:
+    elif metals_new and not prices:
         send_telegram(f"{metals_header}\n\n⚠️ Цены на металлы недоступны.")
         errors.append("prices")
+    else:
+        print("No new metals headlines — skipping metals message.")
 
     save_sent_cache(sent_cache)
 
