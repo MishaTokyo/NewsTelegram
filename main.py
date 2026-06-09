@@ -16,7 +16,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Tokyo"))
+# Always Japan time — 07:00 and 19:00 JST scheduled in .github/workflows/japan-news.yml
+TZ = ZoneInfo("Asia/Tokyo")
 CACHE_FILE = os.getenv("SENT_CACHE_FILE", "sent_cache.json")
 CACHE_TTL_HOURS = 24
 MAX_ITEMS = 20

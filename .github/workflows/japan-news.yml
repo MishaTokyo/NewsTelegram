@@ -2,9 +2,9 @@ name: Japan news brief
 
 on:
   schedule:
-    # 07:00 JST (UTC+9) = 22:00 UTC
+    # 07:00 Japan (JST, UTC+9) → 22:00 UTC
     - cron: "0 22 * * *"
-    # 19:00 JST = 10:00 UTC
+    # 19:00 Japan (JST) → 10:00 UTC
     - cron: "0 10 * * *"
   workflow_dispatch:
     inputs:
@@ -53,5 +53,4 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           RUN_KIND: ${{ steps.kind.outputs.kind }}
-          TIMEZONE: Asia/Tokyo
           SENT_CACHE_FILE: sent_cache.json

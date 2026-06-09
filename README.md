@@ -32,7 +32,7 @@ python main.py
    - `GEMINI_API_KEY`
 3. Actions → Japan news brief → Run workflow (тест)
 
-Расписание: **07:00 и 19:00 JST** (японское время).
+Расписание: **07:00 и 19:00 по Японии (JST, Asia/Tokyo)**. GitHub Actions cron настроен под этот часовой пояс.
 
 ## Формат — два сообщения
 
