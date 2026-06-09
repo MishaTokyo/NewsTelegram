@@ -1,6 +1,6 @@
 # News bot → Telegram
 
-Краткий дайджест 2 раза в день (07:00 и 19:00 JST): **🇯🇵 Япония** (на японском) + **🌍 Мир** (на английском) + перевод. Бесплатно: RSS + Gemini + GitHub Actions.
+Краткий дайджест 2 раза в день (07:00 и 19:00 JST): **🇯🇵 Япония** + **🌍 Мир** + **🥇 Gold & Silver** + перевод под спойлером. Бесплатно: RSS + Yahoo Finance + Gemini + GitHub Actions.
 
 ## Настройка (5 мин)
 
@@ -52,8 +52,12 @@ python main.py
 > ──────────────────  
 > Day 38 of the war. Oil at $126/barrel.
 >
+> 🥇 Gold & Silver  
+> ──────────────────  
+> Gold $4,284 (-1.8%). Silver $47.20 (+0.5%). Fed rates, USD strength, ETF flows. Week: range-bound if CPI inline. Month: hinges on real yields. Year: structural demand vs rate cycle. Not investment advice.
+>
 > ············  
 > Перевод  
-> *[скрыто блюром — нажмите, чтобы открыть]*
+> *[скрыто блюром]*
 
-Чтения в скобках после префектур и имён. Настоящая фуригана в Telegram недоступна — только так.
+Секция металлов — нейтральный анализ без пристрастности. Если новостей нет, приходит только обновление по золоту/серебру с актуальными ценами.
