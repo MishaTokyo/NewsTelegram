@@ -19,6 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Restore sent headlines cache
+        uses: actions/cache/restore@v4
+        with:
+          path: sent_cache.json
+          key: sent-headlines-main
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -41,3 +47,11 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           RUN_KIND: ${{ steps.kind.outputs.kind }}
           TIMEZONE: Asia/Tokyo
+          SENT_CACHE_FILE: sent_cache.json
+
+      - name: Save sent headlines cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: sent_cache.json
+          key: sent-headlines-main

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Japan + World news brief → Telegram. Dense facts only."""
 
+import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import feedparser
@@ -15,6 +16,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TZ = ZoneInfo(os.getenv("TIMEZONE", "Asia/Tokyo"))
+CACHE_FILE = os.getenv("SENT_CACHE_FILE", "sent_cache.json")
+CACHE_TTL_HOURS = 72
 MAX_ITEMS = 20
 TELEGRAM_LIMIT = 4096
 
@@ -59,50 +62,34 @@ Headlines:
 {headlines}
 """
 
-PROMPT = """Write a two-section news brief from the headlines below.
+PROMPT_RULES = """Rules:
+- Cover only the headlines listed below (all are NEW since the last digest).
+- Japan block: ONLY Japan-domestic news. ZERO mentions of other countries.
+- Japanese readings: after prefectures, cities, and personal names in kanji, add reading in Japanese parentheses: 石川県（いしかわけん）、高市早苗（たかいちさなえ）.
+- Dashes (──────────────────) ONLY under section titles and between the two main sections — never under "Перевод".
+- Before each translation: one line of middle dots (············) then "Перевод" — no emojis, no flags.
+- Russian translations: professional newsroom style, not word-for-word literal.
+- Skip minor crime unless nationally significant.
+- Do NOT invent facts.
+- No extra text outside the structure shown."""
 
-Style example (English section):
-"Day 38 of the war. Trump's Tuesday deadline for Iran to reopen the Strait of Hormuz. Two US warplanes downed. Oil at $126/barrel."
-
-Output format (follow EXACTLY):
-
-🇯🇵 日本
+JAPAN_BLOCK = """🇯🇵 日本
 ──────────────────
 
 <one short paragraph, 4–6 sentences, JAPANESE only. Telegraphic style.>
 
 ············
 Перевод
-<professional Russian translation. Newsroom style, same facts, concise. No line of dashes here.>
+<professional Russian translation. Same facts, concise.>"""
 
+WORLD_BLOCK = """🌍 World
 ──────────────────
 
-🌍 World
-──────────────────
-
-<one short paragraph, 4–6 sentences, ENGLISH only. Same telegraphic style.>
+<one short paragraph, 4–6 sentences, ENGLISH only. Telegraphic style.>
 
 ············
 Перевод
-<professional Russian translation. Newsroom style, same facts, concise.>
-
-Rules:
-- Cover the last ~12 hours ({window}).
-- Japan block: ONLY Japan-domestic news. ZERO mentions of other countries.
-- Japanese readings: Telegram has no furigana. After prefectures, cities, and personal names in kanji, add reading in Japanese parentheses: 石川県（いしかわけん）、高市早苗（たかいちさなえ）. Use correct hiragana/katakana readings.
-- Dashes (──────────────────) ONLY under section titles and between the two main sections — never under "Перевод".
-- Before each translation: one line of middle dots (············) then the word "Перевод" on the next line — no emojis, no flags.
-- Russian translations: professional (как Reuters/BBC Russian), not word-for-word literal.
-- Skip minor crime unless nationally significant.
-- Do NOT invent facts.
-- No extra text outside this structure.
-
-JAPAN headlines:
-{japan_headlines}
-
-WORLD headlines:
-{world_headlines}
-"""
+<professional Russian translation. Same facts, concise.>"""
 
 
 def require_env(name: str) -> str:
@@ -127,15 +114,51 @@ def fetch_rss(feeds: list[tuple[str, str]]) -> list[dict]:
     return items
 
 
+def item_key(title: str) -> str:
+    return re.sub(r"\W+", "", title.lower())[:80]
+
+
 def dedupe(items: list[dict], limit: int = MAX_ITEMS) -> list[dict]:
     seen: set[str] = set()
     out: list[dict] = []
     for it in items:
-        key = re.sub(r"\W+", "", it["title"].lower())[:80]
+        key = item_key(it["title"])
         if key not in seen:
             seen.add(key)
             out.append(it)
     return out[:limit]
+
+
+def load_sent_cache() -> dict[str, str]:
+    if not os.path.exists(CACHE_FILE):
+        return {}
+    try:
+        with open(CACHE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return {k: v for k, v in data.items() if isinstance(v, str)}
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Cache read: {e}", file=sys.stderr)
+        return {}
+
+
+def save_sent_cache(cache: dict[str, str]) -> None:
+    cutoff = (datetime.now(TZ) - timedelta(hours=CACHE_TTL_HOURS)).isoformat()
+    pruned = {k: v for k, v in cache.items() if v >= cutoff}
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(pruned, f, ensure_ascii=False, indent=2)
+
+
+def filter_new(items: list[dict], cache: dict[str, str]) -> list[dict]:
+    new = [it for it in items if item_key(it["title"]) not in cache]
+    if len(items) - len(new):
+        print(f"Skipped {len(items) - len(new)} already-sent headlines", file=sys.stderr)
+    return new
+
+
+def mark_sent(items: list[dict], cache: dict[str, str], now: datetime) -> None:
+    ts = now.isoformat()
+    for it in items:
+        cache[item_key(it["title"])] = ts
 
 
 def format_headlines(items: list[dict]) -> str:
@@ -223,13 +246,30 @@ def to_telegram_html(text: str) -> str:
     return "".join(out)
 
 
-def summarize(japan_items: list[dict], world_items: list[dict], window: str) -> str:
-    prompt = PROMPT.format(
-        japan_headlines=format_headlines(japan_items) or "(none)",
-        world_headlines=format_headlines(world_items) or "(none)",
-        window=window,
-    )
-    return clean_brief(call_gemini(prompt))
+def build_prompt(japan_items: list[dict], world_items: list[dict]) -> str:
+    blocks: list[str] = []
+    if japan_items:
+        blocks.append(JAPAN_BLOCK)
+    if japan_items and world_items:
+        blocks.append("──────────────────")
+    if world_items:
+        blocks.append(WORLD_BLOCK)
+
+    parts = [
+        "Write a news brief from the NEW headlines below.",
+        "Output format (follow EXACTLY):\n",
+        "\n\n".join(blocks),
+        PROMPT_RULES,
+    ]
+    if japan_items:
+        parts.append(f"JAPAN headlines:\n{format_headlines(japan_items)}")
+    if world_items:
+        parts.append(f"WORLD headlines:\n{format_headlines(world_items)}")
+    return "\n\n".join(parts)
+
+
+def summarize(japan_items: list[dict], world_items: list[dict]) -> str:
+    return clean_brief(call_gemini(build_prompt(japan_items, world_items)))
 
 
 def send_telegram(text: str, *, html: bool = False) -> None:
@@ -249,20 +289,30 @@ def send_telegram(text: str, *, html: bool = False) -> None:
 
 def main() -> None:
     now = datetime.now(TZ)
-    kind = os.getenv("RUN_KIND", "morning").lower()
-    window = "overnight" if kind == "morning" else "today"
+    header = f"📰 {now:%d.%m.%Y} · {now:%H:%M} JST"
+    sent_cache = load_sent_cache()
 
-    japan_items = filter_japan_headlines(dedupe(fetch_rss(JAPAN_FEEDS)))
-    world_items = dedupe(fetch_rss(WORLD_FEEDS))
+    japan_all = filter_japan_headlines(dedupe(fetch_rss(JAPAN_FEEDS)))
+    world_all = dedupe(fetch_rss(WORLD_FEEDS))
 
-    if not japan_items and not world_items:
-        send_telegram(f"📰 {now:%d.%m.%Y} · {now:%H:%M} JST — sources unavailable.")
+    if not japan_all and not world_all:
+        send_telegram(f"{header}\n\nИсточники недоступны.")
         return
 
-    brief = summarize(japan_items, world_items, window)
-    header = f"📰 {now:%d.%m.%Y} · {now:%H:%M} JST"
+    japan_items = filter_new(japan_all, sent_cache)
+    world_items = filter_new(world_all, sent_cache)
+
+    if not japan_items and not world_items:
+        send_telegram(f"{header}\n\nНовых новостей с прошлой рассылки нет.")
+        print("Nothing new to send.")
+        return
+
+    brief = summarize(japan_items, world_items)
     send_telegram(to_telegram_html(f"{header}\n\n{brief}"), html=True)
-    print("Sent.", len(brief), "chars")
+
+    mark_sent(japan_items + world_items, sent_cache, now)
+    save_sent_cache(sent_cache)
+    print("Sent.", len(brief), "chars,", len(japan_items) + len(world_items), "new headlines")
 
 
 if __name__ == "__main__":
