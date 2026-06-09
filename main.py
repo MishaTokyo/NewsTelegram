@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -42,25 +43,6 @@ FOREIGN_MARKERS = re.compile(
     r"インド|パキスタン|シリア|イラク|アフガン|フランク|ドイツ|"
     r"英首相|米大統領|国連総会|海外|外国|グローバル|国際情勢"
 )
-
-FILTER_PROMPT = """You filter NHK headlines for a JAPAN-DOMESTIC news digest.
-
-INCLUDE only headlines about:
-- Events happening IN Japan (disasters, crime, local government, prefectures, cities)
-- Japanese national politics, economy, society, culture, sports IN Japan
-- Japanese companies/domestic policy when the story is about Japan itself
-
-EXCLUDE headlines primarily about:
-- Other countries, foreign leaders, foreign wars, foreign elections
-- International relations UNLESS the story is exclusively about a domestic Japanese decision/impact
-- World economy/foreign markets UNLESS about Japan's domestic economy/markets
-
-Return ONLY the exact headline lines to keep (copy verbatim, one per line).
-If none qualify, return exactly: NONE
-
-Headlines:
-{headlines}
-"""
 
 PROMPT_RULES = """Rules:
 - Cover only the headlines listed below (all are NEW since the last digest).
@@ -169,15 +151,20 @@ def call_gemini(prompt: str) -> str:
     genai.configure(api_key=require_env("GEMINI_API_KEY"))
     last_err: Exception | None = None
     for name in GEMINI_MODELS:
-        try:
-            resp = genai.GenerativeModel(name).generate_content(prompt)
-            text = (resp.text or "").strip()
-            if text:
-                print(f"Gemini model: {name}", file=sys.stderr)
-                return text
-        except Exception as e:
-            last_err = e
-            print(f"Gemini {name}: {e}", file=sys.stderr)
+        for attempt in range(3):
+            try:
+                resp = genai.GenerativeModel(name).generate_content(prompt)
+                text = (resp.text or "").strip()
+                if text:
+                    print(f"Gemini model: {name}", file=sys.stderr)
+                    return text
+            except Exception as e:
+                last_err = e
+                print(f"Gemini {name} (try {attempt + 1}): {e}", file=sys.stderr)
+                if "429" in str(e) and attempt < 2:
+                    time.sleep(40 * (attempt + 1))
+                    continue
+                break
     raise RuntimeError(f"All Gemini models failed: {last_err}")
 
 
@@ -190,29 +177,9 @@ def prefilter_japan(items: list[dict]) -> list[dict]:
 
 
 def filter_japan_headlines(items: list[dict]) -> list[dict]:
-    items = prefilter_japan(items)
-    if not items:
-        return []
-
-    raw = call_gemini(FILTER_PROMPT.format(headlines=format_headlines(items)))
-    if raw.strip().upper() == "NONE":
-        return []
-
-    kept_titles = {line.strip() for line in raw.splitlines() if line.strip()}
-    filtered = [
-        it for it in items
-        if it["title"] in kept_titles
-        or f"[{it['source']}] {it['title']}" in kept_titles
-    ]
-    if filtered:
-        print(f"Japan filter: {len(items)} → {len(filtered)}", file=sys.stderr)
-        return filtered
-
-    # Fallback: match by title substring if model paraphrased slightly
-    for title in kept_titles:
-        for it in items:
-            if it["title"] in title or title in it["title"]:
-                filtered.append(it)
+    """Keep Japan-domestic headlines without an extra Gemini call (saves API quota)."""
+    filtered = prefilter_japan(items)
+    print(f"Japan filter: {len(items)} → {len(filtered)}", file=sys.stderr)
     return dedupe(filtered, limit=MAX_ITEMS)
 
 
@@ -307,7 +274,13 @@ def main() -> None:
         print("Nothing new to send.")
         return
 
-    brief = summarize(japan_items, world_items)
+    try:
+        brief = summarize(japan_items, world_items)
+    except RuntimeError as e:
+        send_telegram(f"{header}\n\n⚠️ Не удалось сгенерировать дайджест (лимит Gemini API). Попробуйте позже.")
+        print(f"Gemini failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
     send_telegram(to_telegram_html(f"{header}\n\n{brief}"), html=True)
 
     mark_sent(japan_items + world_items, sent_cache, now)
