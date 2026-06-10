@@ -114,39 +114,29 @@ WORLD_BLOCK = """🌍 World
 Перевод
 <professional Russian translation. Same facts, concise.>"""
 
-METALS_PROMPT = """Compile a precious-metals brief from HEADLINES ONLY (separate Telegram message).
+METALS_PROMPT = """Собери дайджест по драгметаллам на РУССКОМ. Источники — только заголовки ниже.
 
-Output format (follow EXACTLY):
+Формат (строго):
 
-🥇 Metals
-──────────────────
+{prices}
 
-<one line: copy SPOT PRICES verbatim, format "Gold $X (+Y%) · Silver $Z (+W%)">
+[Золото]:
+Сегодня <3–5 коротких фактов из GOLD headlines. Деловой стиль Reuters. Только факты из заголовков.>
 
-Gold
-──────────────────
+[Серебро]:
+Сегодня <3–5 коротких фактов из SILVER headlines. Только факты из заголовков.>
 
-<ENGLISH only. One short paragraph, 4–6 telegraphic sentences. Summarize ONLY the GOLD headlines below — facts, numbers, names. Do NOT invent. Do NOT add macro opinion not in headlines.>
+[Анализ]:
+<3–4 предложения на русском. Как эти новости и мнения институтов (ANALYSIS SOURCES) влияют на цену золота и серебра. Укажи перспективу: ~7 дней / ~30 дней / ~1 год. Нейтрально, без хайпа. Упоминай источники: «ФРС: ...», «Sprott: ...». Только из источников, ничего не выдумывай. Не инвестиционная рекомендация.>
 
-Silver
-──────────────────
-
-<ENGLISH only. One short paragraph, 4–6 telegraphic sentences. Summarize ONLY the SILVER headlines below.>
-
-[анализ]
-<ENGLISH. MAX 3 sentences. Outlook for ~7 days / ~30 days / ~1 year — synthesize ONLY from ANALYSIS SOURCES below (central banks, analysts, institutions). Attribute sources: "Fed: ...", "Sprott: ...", "Citi: ...". Balanced, neutral. If sources lack outlook data, write: "No institutional outlook in current sources." Do NOT invent opinions or forecasts. Not investment advice.>
-
-············
-Перевод
-<Russian translation of Gold + Silver + [анализ] blocks. Professional, concise.>
-
-Rules:
-- Gold/Silver sections: ONLY from GOLD/SILVER headlines. No fabricated news.
-- [анализ]: ONLY from ANALYSIS SOURCES. Never invent central bank or analyst views.
-- If a metal has no headlines, write one line: "No major headlines."
-- [анализ] must be ≤3 sentences.
-- Use SPOT PRICES exactly on the first line.
-- No extra sections.
+Правила:
+- Весь текст на русском.
+- Без подчёркиваний, линий, эмодзи внутри блоков.
+- Без блока «Перевод».
+- [Золото] и [Серебро] — только из соответствующих заголовков.
+- [Анализ] — из новостей + ANALYSIS SOURCES.
+- Если заголовков нет: «Существенных новостей нет.»
+- Цены — первая строка, как в SPOT PRICES.
 
 SPOT PRICES:
 {prices}
@@ -157,7 +147,7 @@ GOLD headlines:
 SILVER headlines:
 {silver_headlines}
 
-ANALYSIS SOURCES (central banks, institutions, analyst views — use ONLY for [анализ]):
+ANALYSIS SOURCES:
 {analysis_headlines}
 """
 
@@ -413,7 +403,7 @@ def send_telegram(text: str, *, html: bool = False) -> None:
 def main() -> None:
     now = datetime.now(TZ)
     news_header = f"📰 {now:%d.%m.%Y} · {now:%H:%M} JST"
-    metals_header = f"🥇 Metals · {now:%d.%m.%Y} · {now:%H:%M} JST"
+    metals_header = f"🥇 {now:%d.%m.%Y} · {now:%H:%M} JST"
     sent_cache = load_sent_cache()
     prices = fetch_metals_prices()
     errors: list[str] = []
@@ -446,7 +436,7 @@ def main() -> None:
     if metals_new or analysis_new:
         try:
             metals_brief = summarize_metals(metals_new, analysis_all, prices)
-            send_telegram(f"{metals_header}\n\n{metals_brief}", html=True)
+            send_telegram(f"{metals_header}\n\n{metals_brief}", html=False)
             mark_sent(metals_new + analysis_new, sent_cache, now)
             print(
                 f"Metals sent. news={len(metals_new)} analysis={len(analysis_new)}",
