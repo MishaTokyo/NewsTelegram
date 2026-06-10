@@ -85,26 +85,30 @@ FOREIGN_MARKERS = re.compile(
     r"英首相|米大統領|国連総会|海外|外国|グローバル|国際情勢"
 )
 
+SECTION_SEP = "· · · · · · · · · ·"
+
 NEWS_PROMPT_RULES = """Rules:
 - Cover only the headlines listed below (all are NEW since the last digest).
 - Japan block: ONLY Japan-domestic news. ZERO mentions of other countries.
 - Japanese readings: after prefectures, cities, and personal names in kanji, add reading in parentheses: 石川県（いしかわけん）、高市早苗（たかいちさなえ）.
-- No emoji flags. No long underline lines (───). Section separator between Japan and World: exactly "----------------" on its own line.
+- Japan text MUST start with「本日は」.
+- No emoji flags. No long underline lines.
+- Section separator between Japan and World: exactly "{sep}" on its own line.
 - Russian translations: professional newsroom style, concise.
 - Skip minor crime unless nationally significant.
 - Do NOT invent facts.
 - No extra text outside the structure shown."""
 
-JAPAN_BLOCK = """『日本』
-<one short paragraph, 4–6 sentences, JAPANESE only. Telegraphic style.>
+JAPAN_BLOCK = """[Япония]:
+本日は<one short paragraph, 4–6 sentences, JAPANESE only. Must begin with 本日は. Telegraphic style.>
 
-Перевод:
+[Перевод]:
 <professional Russian translation. Same facts, concise.>"""
 
-WORLD_BLOCK = """[World News]
+WORLD_BLOCK = """[World News]:
 <one short paragraph, 4–6 sentences, ENGLISH only. Telegraphic style.>
 
-Перевод
+[Перевод]:
 <professional Russian translation. Same facts, concise.>"""
 
 METALS_PROMPT = """Собери дайджест по драгметаллам на РУССКОМ. Источники — только заголовки ниже.
@@ -309,7 +313,7 @@ def escape_html(text: str) -> str:
 
 
 TRANSLATION_RE = re.compile(
-    r"(Перевод:?\s*\n)(.+?)(?=\n\n----------------|\n\n\[World News\]|\n\n『日本』|\Z)",
+    r"(\[Перевод\]:\s*\n)(.+?)(?=\n\n· · ·|\n\n\[World News\]|\n\n\[Япония\]|\Z)",
     re.DOTALL,
 )
 
