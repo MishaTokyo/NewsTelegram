@@ -88,29 +88,22 @@ FOREIGN_MARKERS = re.compile(
 NEWS_PROMPT_RULES = """Rules:
 - Cover only the headlines listed below (all are NEW since the last digest).
 - Japan block: ONLY Japan-domestic news. ZERO mentions of other countries.
-- Japanese readings: after prefectures, cities, and personal names in kanji, add reading in Japanese parentheses: 石川県（いしかわけん）、高市早苗（たかいちさなえ）.
-- Dashes (──────────────────) ONLY under section titles and between main sections — never under "Перевод".
-- Before each translation: one line of middle dots (············) then "Перевод" — no emojis, no flags.
-- Russian translations: professional newsroom style.
+- Japanese readings: after prefectures, cities, and personal names in kanji, add reading in parentheses: 石川県（いしかわけん）、高市早苗（たかいちさなえ）.
+- No emoji flags. No long underline lines (───). Section separator between Japan and World: exactly "----------------" on its own line.
+- Russian translations: professional newsroom style, concise.
 - Skip minor crime unless nationally significant.
 - Do NOT invent facts.
 - No extra text outside the structure shown."""
 
-JAPAN_BLOCK = """🇯🇵 日本
-──────────────────
-
+JAPAN_BLOCK = """『日本』
 <one short paragraph, 4–6 sentences, JAPANESE only. Telegraphic style.>
 
-············
-Перевод
+Перевод:
 <professional Russian translation. Same facts, concise.>"""
 
-WORLD_BLOCK = """🌍 World
-──────────────────
-
+WORLD_BLOCK = """[World News]
 <one short paragraph, 4–6 sentences, ENGLISH only. Telegraphic style.>
 
-············
 Перевод
 <professional Russian translation. Same facts, concise.>"""
 
@@ -307,7 +300,6 @@ def filter_japan_headlines(items: list[dict]) -> list[dict]:
 
 def clean_brief(text: str) -> str:
     text = text.replace("🇷🇺", "")
-    text = re.sub(r"(Перевод\n)\s*─+\s*\n", r"\1", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -317,7 +309,7 @@ def escape_html(text: str) -> str:
 
 
 TRANSLATION_RE = re.compile(
-    r"([·]{6,}\s*\nПеревод\n)(.+?)(?=\n\n──────────────────|\Z)",
+    r"(Перевод:?\s*\n)(.+?)(?=\n\n----------------|\n\n\[World News\]|\n\n『日本』|\Z)",
     re.DOTALL,
 )
 
@@ -339,7 +331,7 @@ def build_news_prompt(japan_items: list[dict], world_items: list[dict]) -> str:
     if japan_items:
         blocks.append(JAPAN_BLOCK)
     if japan_items and world_items:
-        blocks.append("──────────────────")
+        blocks.append("----------------")
     if world_items:
         blocks.append(WORLD_BLOCK)
 
