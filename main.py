@@ -335,7 +335,7 @@ def build_news_prompt(japan_items: list[dict], world_items: list[dict]) -> str:
     if japan_items:
         blocks.append(JAPAN_BLOCK)
     if japan_items and world_items:
-        blocks.append("----------------")
+        blocks.append(SECTION_SEP)
     if world_items:
         blocks.append(WORLD_BLOCK)
 
@@ -343,7 +343,7 @@ def build_news_prompt(japan_items: list[dict], world_items: list[dict]) -> str:
         "Write a news brief from the NEW headlines below.",
         "Output format (follow EXACTLY):\n",
         "\n\n".join(blocks),
-        NEWS_PROMPT_RULES,
+        NEWS_PROMPT_RULES.format(sep=SECTION_SEP),
     ]
     if japan_items:
         parts.append(f"JAPAN headlines:\n{format_headlines(japan_items)}")
