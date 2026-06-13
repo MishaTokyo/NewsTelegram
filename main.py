@@ -10,9 +10,9 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import feedparser
-import google.generativeai as genai
 import requests
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
@@ -75,8 +75,12 @@ ANALYSIS_MACRO_KW = re.compile(
 )
 CB_SOURCES = frozenset({"Fed", "ECB"})
 
-# flash-lite first: higher free-tier daily quota (see aistudio.google.com/rate-limit)
-GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash"]
+# Cheap models first; override with OPENAI_MODEL=gpt-4o-mini,gpt-4.1-mini
+OPENAI_MODELS = [
+    m.strip()
+    for m in os.getenv("OPENAI_MODEL", "gpt-4o-mini,gpt-4.1-mini").split(",")
+    if m.strip()
+]
 
 FOREIGN_MARKERS = re.compile(
     r"アメリカ|米国|トランプ|バイデン|中国|ロシア|ウクライナ|イスラエル|"
@@ -270,25 +274,29 @@ def format_headlines(items: list[dict]) -> str:
     return "\n".join(f"[{it['source']}] {it['title']}" for it in items)
 
 
-def call_gemini(prompt: str) -> str:
-    genai.configure(api_key=require_env("GEMINI_API_KEY"))
+def call_openai(prompt: str) -> str:
+    client = OpenAI(api_key=require_env("OPENAI_API_KEY"))
     last_err: Exception | None = None
-    for name in GEMINI_MODELS:
+    for name in OPENAI_MODELS:
         for attempt in range(3):
             try:
-                resp = genai.GenerativeModel(name).generate_content(prompt)
-                text = (resp.text or "").strip()
+                resp = client.chat.completions.create(
+                    model=name,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = (resp.choices[0].message.content or "").strip()
                 if text:
-                    print(f"Gemini model: {name}", file=sys.stderr)
+                    print(f"OpenAI model: {name}", file=sys.stderr)
                     return text
             except Exception as e:
                 last_err = e
-                print(f"Gemini {name} (try {attempt + 1}): {e}", file=sys.stderr)
-                if "429" in str(e) and attempt < 2:
+                print(f"OpenAI {name} (try {attempt + 1}): {e}", file=sys.stderr)
+                err = str(e).lower()
+                if ("429" in err or "rate_limit" in err) and attempt < 2:
                     time.sleep(40 * (attempt + 1))
                     continue
                 break
-    raise RuntimeError(f"All Gemini models failed: {last_err}")
+    raise RuntimeError(f"All OpenAI models failed: {last_err}")
 
 
 def prefilter_japan(items: list[dict]) -> list[dict]:
@@ -353,7 +361,7 @@ def build_news_prompt(japan_items: list[dict], world_items: list[dict]) -> str:
 
 
 def summarize_news(japan_items: list[dict], world_items: list[dict]) -> str:
-    return clean_brief(call_gemini(build_news_prompt(japan_items, world_items)))
+    return clean_brief(call_openai(build_news_prompt(japan_items, world_items)))
 
 
 def split_gold_silver(items: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -374,7 +382,7 @@ def summarize_metals(
         silver_headlines=format_headlines(silver) or "(none)",
         analysis_headlines=format_headlines(analysis_headlines) or "(none)",
     )
-    return clean_brief(call_gemini(prompt))
+    return clean_brief(call_openai(prompt))
 
 
 def send_telegram(text: str, *, html: bool = False) -> None:
@@ -423,7 +431,7 @@ def main() -> None:
             print(f"News sent. japan={len(japan_items)} world={len(world_items)}")
         except RuntimeError as e:
             errors.append("news")
-            send_telegram(f"{news_header}\n\n⚠️ Не удалось сгенерировать новости (лимит Gemini API).")
+            send_telegram(f"{news_header}\n\n⚠️ Не удалось сгенерировать новости (ошибка OpenAI API).")
             print(f"News failed: {e}", file=sys.stderr)
     else:
         print("No new news — skipping news message.")
@@ -439,7 +447,7 @@ def main() -> None:
             )
         except RuntimeError as e:
             errors.append("metals")
-            send_telegram(f"{metals_header}\n\n⚠️ Не удалось сгенерировать дайджест металлов (лимит Gemini API).")
+            send_telegram(f"{metals_header}\n\n⚠️ Не удалось сгенерировать дайджест металлов (ошибка OpenAI API).")
             print(f"Metals failed: {e}", file=sys.stderr)
     else:
         print("No new metals/analysis headlines — skipping metals message.")

@@ -10,15 +10,15 @@
 2. Напишите боту любое сообщение
 3. Откройте `https://api.telegram.org/bot<TOKEN>/getUpdates` → найдите `"chat":{"id":...}`
 
-### 2. Gemini (бесплатно)
+### 2. OpenAI
 
-[Google AI Studio](https://aistudio.google.com/apikey) → Create API Key
+[OpenAI API keys](https://platform.openai.com/api-keys) → Create API Key (рекомендуется `gpt-4o-mini`)
 
 ### 3. Локальный тест
 
 ```bash
 cp .env.example .env
-# заполните TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GEMINI_API_KEY
+# заполните TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, OPENAI_API_KEY
 pip install -r requirements.txt
 python main.py
 ```
@@ -29,7 +29,7 @@ python main.py
 2. Settings → Secrets → Actions → добавьте:
    - `TELEGRAM_BOT_TOKEN`
    - `TELEGRAM_CHAT_ID`
-   - `GEMINI_API_KEY`
+   - `OPENAI_API_KEY`
 3. Actions → Japan news brief → Run workflow (тест)
 
 Расписание: **07:00 и 19:00 по Японии (JST, Asia/Tokyo)**. GitHub Actions cron настроен под этот часовой пояс.
